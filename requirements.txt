@@ -5,3 +5,10 @@ openai
 faiss-cpu
 langchain
 langchain-community
+tiktoken
+streamlit
+langchain
+openai
+tiktoken
+pandas
+faiss-cpu
