@@ -3,12 +3,15 @@ import pandas as pd
 import streamlit as st
 from glob import glob
 
-from langchain_community.embeddings import OllamaEmbeddings
+from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.chat_models import ChatOpenAI
-from langchain_community.vectorstores import FAISS
+
+from langchain.vectorstores import FAISS
 from langchain.docstore.document import Document
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
+
+
 
 # ---- CONFIG ----
 DOCUMENTS_FOLDER = "chatbot_docs"
