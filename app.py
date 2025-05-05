@@ -4,7 +4,7 @@ import streamlit as st
 from glob import glob
 
 from langchain_community.embeddings import OllamaEmbeddings
-from langchain_community.chat_models import ChatOllama
+from langchain_community.llms import Ollama
 from langchain_community.vectorstores import FAISS
 from langchain.docstore.document import Document
 
@@ -16,13 +16,13 @@ FAISS_INDEX_PATH = f"./faiss_index_{MODEL_NAME}"
 
 # ---- INIT MODELS ----
 embedding_model = OllamaEmbeddings(model=MODEL_NAME)
-chat_model = ChatOllama(model=MODEL_NAME)
+chat_model = Ollama(model=MODEL_NAME)
 
 # ---- STREAMLIT UI ----
 st.set_page_config(page_title="Ask Riyadh!", page_icon="📊")
-st.title(f"📊 Ask Riyadh — powered by {MODEL_NAME}")
+st.title("📊 Ask Riyadh!")
 
-# ---- LOAD / CONVERT FILES ----
+# ---- LOAD / BUILD INDEX ----
 all_documents = []
 
 if not os.path.exists(FAISS_INDEX_PATH):
@@ -37,7 +37,7 @@ if not os.path.exists(FAISS_INDEX_PATH):
             file_name = os.path.basename(file_path)
             for _, row in df.iterrows():
                 row_dict = {col: str(row[col]) for col in df.columns if pd.notna(row[col])}
-                row_text = f"File: {file_name}. Data: " + " | ".join([f"{k} = {v}" for k, v in row_dict.items()])
+                row_text = " | ".join([f"{k}: {v}" for k, v in row_dict.items()])
                 all_documents.append(Document(page_content=row_text))
         except Exception as e:
             st.warning(f"Error loading {file_path}: {e}")
@@ -49,30 +49,30 @@ if not os.path.exists(FAISS_INDEX_PATH):
 else:
     vectorstore = FAISS.load_local(FAISS_INDEX_PATH, embedding_model, allow_dangerous_deserialization=True)
 
-# ---- CHAT UI ----
+# ---- CHAT SESSION ----
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
 user_input = st.chat_input("Ask something from your data...")
 
 if user_input:
-    # Retrieve documents manually
-    retrieved_docs = vectorstore.similarity_search(user_input, k=4)
-    retrieved_texts = "\n\n".join([doc.page_content for doc in retrieved_docs])
+    # Retrieve docs
+    retrieved_docs = vectorstore.similarity_search(user_input, k=6)
+    retrieved_texts = "\n".join([doc.page_content for doc in retrieved_docs])
 
-    # Build prompt manually
+    # Construct manual prompt
     full_prompt = f"""
-You are an expert on Riyadh's traffic, air quality, and weather.
-Only answer based on the following documents. If no relevant info, say:
-"Sorry, I couldn't find related info in the uploaded data."
-
-Documents:
-{retrieved_texts}
+You are a helpful assistant specialized in answering questions based on municipal traffic data for Riyadh.
+Use the data below to answer the question as best as you can. If you cannot find the exact answer, try to infer from the available details.
 
 Question: {user_input}
+
+Context Data:
+{retrieved_texts}
 """
 
-    response = chat_model.invoke(full_prompt).content
+    # Call model
+    response = chat_model.invoke(full_prompt)
     st.session_state.chat_history.append((user_input, response))
 
 # ---- DISPLAY CHAT ----
@@ -81,9 +81,3 @@ for user_msg, bot_msg in st.session_state.chat_history:
         st.markdown(user_msg)
     with st.chat_message("assistant"):
         st.markdown(bot_msg)
-
-# ---- SIDEBAR ----
-with st.sidebar:
-    if st.button("Clear Chat History"):
-        st.session_state.chat_history = []
-        st.success("Chat history cleared!")
