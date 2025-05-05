@@ -10,5 +10,4 @@ streamlit
 langchain
 openai
 tiktoken
-pandas
-faiss-cpu
+sentence-transformers

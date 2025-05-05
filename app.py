@@ -3,32 +3,26 @@ import pandas as pd
 import streamlit as st
 from glob import glob
 
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.chat_models import ChatOpenAI
-
-from langchain_community.vectorstores import FAISS
+from sentence_transformers import SentenceTransformer
+import faiss
 from langchain.docstore.document import Document
-from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
-
-
+from langchain.chains import ConversationalRetrievalChain
+from langchain.vectorstores import FAISS
+from langchain.chains.llm import LLMChain
 
 # ---- CONFIG ----
 DOCUMENTS_FOLDER = "chatbot_docs"
-MODEL_NAME = "gpt-3.5-turbo"
+MODEL_NAME = "all-MiniLM-L6-v2"
 MAX_ROWS_PER_FILE = 100
 FAISS_INDEX_PATH = f"./faiss_index_{MODEL_NAME}"
 
-# ---- AUTH ----
-os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
-
-# ---- INIT MODELS ----
-embeddings = OpenAIEmbeddings()
-chat_model = ChatOpenAI(model_name=MODEL_NAME)
+# ---- INIT EMBEDDINGS ----
+embedding_model = SentenceTransformer(MODEL_NAME)
 
 # ---- STREAMLIT UI ----
 st.set_page_config(page_title="Ask Riyadh!", page_icon="📊")
-st.title(f"📊 Ask Riyadh — powered by {MODEL_NAME}")
+st.title("📊 Ask Riyadh — powered by MiniLM (Free)")
 
 # ---- LOAD / CONVERT FILES ----
 all_documents = []
@@ -51,39 +45,28 @@ if not os.path.exists(FAISS_INDEX_PATH):
             st.warning(f"Error loading {file_path}: {e}")
         progress.progress((i + 1) / total_files)
 
-    vectorstore = FAISS.from_documents(all_documents, embeddings)
+    texts = [doc.page_content for doc in all_documents]
+    embeddings = embedding_model.encode(texts)
+    index = faiss.IndexFlatL2(embeddings[0].shape[0])
+    index.add(embeddings)
+    vectorstore = FAISS(embedding_model, texts, index)
     vectorstore.save_local(FAISS_INDEX_PATH)
     st.success("Index built successfully!")
 else:
-    vectorstore = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
+    vectorstore = FAISS.load_local(FAISS_INDEX_PATH, embedding_model)
 
-# ---- BUILD QA CHAIN ----
-memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-qa_chain = ConversationalRetrievalChain.from_llm(
-    llm=chat_model,
-    retriever=vectorstore.as_retriever(search_kwargs={"k": 10}),
-    memory=memory
-)
-
-# ---- CHAT UI ----
+# ---- CHAT MEMORY ----
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
+# ---- CHAT UI ----
 user_input = st.chat_input("Ask something from your data...")
 
 if user_input:
-    prompt = f"""
-    You are an expert advisor on traffic, air quality, and weather in Riyadh, Saudi Arabia.
+    query_embedding = embedding_model.encode([user_input])
+    D, I = vectorstore.index.search(query_embedding, k=1)
+    response = vectorstore.texts[I[0][0]]
 
-    If the question is unrelated to those topics or not found in the embedded data, reply:
-    "Sorry, I only answer questions related to Riyadh’s traffic, air quality, or weather."
-
-    Do not guess or provide examples. Do not generate additional explanations.
-    Answer in English only.
-
-    Question: {user_input}
-    """
-    response = qa_chain.run(prompt)
     st.session_state.chat_history.append((user_input, response))
 
 # ---- DISPLAY CHAT ----
