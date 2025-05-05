@@ -1,13 +1,6 @@
 streamlit
 pandas
 langchain
-openai
-faiss-cpu
-langchain
 langchain-community
-tiktoken
-streamlit
-langchain
-openai
-tiktoken
+faiss-cpu
 sentence-transformers

@@ -3,26 +3,24 @@ import pandas as pd
 import streamlit as st
 from glob import glob
 
-from sentence_transformers import SentenceTransformer
-import faiss
+from langchain_community.embeddings import OllamaEmbeddings
+from langchain_community.chat_models import ChatOllama
+from langchain_community.vectorstores import FAISS
 from langchain.docstore.document import Document
-from langchain.memory import ConversationBufferMemory
-from langchain.chains import ConversationalRetrievalChain
-from langchain.vectorstores import FAISS
-from langchain.chains.llm import LLMChain
 
 # ---- CONFIG ----
 DOCUMENTS_FOLDER = "chatbot_docs"
-MODEL_NAME = "all-MiniLM-L6-v2"
+MODEL_NAME = "tinyllama"
 MAX_ROWS_PER_FILE = 100
 FAISS_INDEX_PATH = f"./faiss_index_{MODEL_NAME}"
 
-# ---- INIT EMBEDDINGS ----
-embedding_model = SentenceTransformer(MODEL_NAME)
+# ---- INIT MODELS ----
+embedding_model = OllamaEmbeddings(model=MODEL_NAME)
+chat_model = ChatOllama(model=MODEL_NAME)
 
 # ---- STREAMLIT UI ----
 st.set_page_config(page_title="Ask Riyadh!", page_icon="📊")
-st.title("📊 Ask Riyadh — powered by MiniLM (Free)")
+st.title(f"📊 Ask Riyadh — powered by {MODEL_NAME}")
 
 # ---- LOAD / CONVERT FILES ----
 all_documents = []
@@ -45,28 +43,36 @@ if not os.path.exists(FAISS_INDEX_PATH):
             st.warning(f"Error loading {file_path}: {e}")
         progress.progress((i + 1) / total_files)
 
-    texts = [doc.page_content for doc in all_documents]
-    embeddings = embedding_model.encode(texts)
-    index = faiss.IndexFlatL2(embeddings[0].shape[0])
-    index.add(embeddings)
-    vectorstore = FAISS(embedding_model, texts, index)
+    vectorstore = FAISS.from_documents(all_documents, embedding_model)
     vectorstore.save_local(FAISS_INDEX_PATH)
     st.success("Index built successfully!")
 else:
-    vectorstore = FAISS.load_local(FAISS_INDEX_PATH, embedding_model)
+    vectorstore = FAISS.load_local(FAISS_INDEX_PATH, embedding_model, allow_dangerous_deserialization=True)
 
-# ---- CHAT MEMORY ----
+# ---- CHAT UI ----
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# ---- CHAT UI ----
 user_input = st.chat_input("Ask something from your data...")
 
 if user_input:
-    query_embedding = embedding_model.encode([user_input])
-    D, I = vectorstore.index.search(query_embedding, k=1)
-    response = vectorstore.texts[I[0][0]]
+    # Retrieve documents manually
+    retrieved_docs = vectorstore.similarity_search(user_input, k=4)
+    retrieved_texts = "\n\n".join([doc.page_content for doc in retrieved_docs])
 
+    # Build prompt manually
+    full_prompt = f"""
+You are an expert on Riyadh's traffic, air quality, and weather.
+Only answer based on the following documents. If no relevant info, say:
+"Sorry, I couldn't find related info in the uploaded data."
+
+Documents:
+{retrieved_texts}
+
+Question: {user_input}
+"""
+
+    response = chat_model.invoke(full_prompt).content
     st.session_state.chat_history.append((user_input, response))
 
 # ---- DISPLAY CHAT ----
